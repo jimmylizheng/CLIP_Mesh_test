@@ -11,6 +11,8 @@ import random
 import argparse
 import numpy as np
 
+import psutil
+
 from loop import loop
 
 def main():
@@ -95,6 +97,15 @@ def main():
     parser.add_argument('--offsets',            help="After scaling (x, y, z) offset vertices", nargs='+', action='append', type=float, default=argparse.SUPPRESS)
 
     args = vars(parser.parse_args())
+    
+    # Function to get memory usage
+    def get_memory_usage():
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        return mem_info.rss  # Resident Set Size (RSS) in bytes
+
+    # Get inital memory
+    initial_memory = get_memory_usage()
 
     # Check if config passed - if so then parse it
     if args['config'] is not None:
@@ -130,6 +141,14 @@ def main():
     torch.backends.cudnn.deterministic = True
 
     loop(cfg)
+    
+    # Calculate memory usage after running your code
+    final_memory = get_memory_usage()
+
+    # Calculate the difference
+    memory_used = final_memory - initial_memory
+
+    print(f"Memory used: {memory_used} bytes")
 
 if __name__ == '__main__':
     main()
