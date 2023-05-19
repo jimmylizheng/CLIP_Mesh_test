@@ -7,6 +7,7 @@ import yaml
 import torch
 import kornia
 import torchvision
+import time
 
 import numpy                as np
 import nvdiffrast.torch     as dr
@@ -31,6 +32,16 @@ from nvdiffmodeling.src     import texture
 from nvdiffmodeling.src     import regularizer
 
 def loop(cfg):
+    
+    prior_duration=0
+    text_embed_duration=0
+    lap_loss_duration=0
+    render_duration=0
+    total_loss_duration=0
+    update_duration=0
+    total_generation_time=0
+    
+    total_start_t=time.time()
 
     # Set unique output path
     now = datetime.now()
@@ -63,6 +74,7 @@ def loop(cfg):
     # Intialize GL Context
     glctx = dr.RasterizeGLContext()
 
+    start_time=time.time()
     # Get text embedding
     print("Text is %s" % cfg["text_prompt"])
 
@@ -70,9 +82,14 @@ def loop(cfg):
     with torch.no_grad():
         texts_embeds = model.encode_text(texts_embeds).detach()
         texts_embeds = texts_embeds / texts_embeds.norm(dim=1, keepdim=True)
+    
+    end_time=time.time()
+    duration=end_time-start_time
+    text_embed_duration+=duration
 
     # Setup Prior model & get image prior (text embed -> image embed)
     if cfg["prior_path"] is not None:
+        start_time=time.time()
 
         state_dict = torch.load(cfg["prior_path"], map_location=device)["model"]
 
@@ -103,6 +120,10 @@ def loop(cfg):
 
         del prior_network, diffusion_prior, state_dict
         torch.cuda.empty_cache()
+        
+        end_time=time.time()
+        duration=end_time-start_time
+        prior_duration+=duration
 
     # Load all meshes and setup training parameters
     meshes = [] # store Mesh objects
@@ -227,9 +248,11 @@ def loop(cfg):
 
     # Optimization Loop
     rot_ang = 0.0
-    t_loop = tqdm(range(cfg["epochs"]), leave=False)
+    t_loop = tqdm(range(cfg["epochs"]), leave=False) # visualize the loop
 
     for it in t_loop:
+        
+        start_time=time.time()
         
         render_meshes = []          # store meshes with texture that will be rendered
         render_meshes_notex = []    # store meshes without texture that will be rendered
@@ -324,6 +347,7 @@ def loop(cfg):
         complete_scene = mesh.compute_tangents(complete_scene)
 
         if it < cfg["epochs"] * cfg["shape_imgs_frac"] and vert_train:
+            # scene without texture
             complete_scene_notex = create_scene(render_meshes_notex, sz=cfg["texture_resolution"])
             complete_scene_notex = mesh.auto_normals(complete_scene_notex)
             complete_scene_notex = mesh.compute_tangents(complete_scene_notex)
@@ -490,7 +514,13 @@ def loop(cfg):
                 plt.show()
 
             im.save(os.path.join(cfg["path"], 'epoch_%d.png' % it))
+        
+        end_time=time.time()
+        duration=end_time-start_time
+        render_duration+=duration
+        print(f"In iteration {it}, total time for rendering is {duration} seconds")
 
+        loss_start_t=time.time()
         # Convert image to image embeddings
         image_embeds = model.encode_image(
             (train_render - clip_mean[None, :, None, None]) / clip_std[None, :, None, None]
@@ -504,6 +534,7 @@ def loop(cfg):
         if cfg["prior_path"] is not None:
             prior_loss = cosine_avg(image_embeds, prior_embeds)
 
+        start_time=time.time()
         # Evaluate laplacian for each mesh in scene to be deformed
         lapls = []
         lapls_l = 0
@@ -520,13 +551,25 @@ def loop(cfg):
 
         for lap_l in lapls:
             lapls_l += (laplacian_weight * lap_l)
+            
+        end_time=time.time()
+        duration=end_time-start_time
+        lap_loss_duration+=duration
+        print(f"In iteration {it}, total time for computing laplace loss is {duration} seconds")
 
         # Get total loss and backprop
         if cfg["prior_path"] is not None:
             total_loss = (cfg["clip_weight"] * clip_loss) + (cfg["diff_loss_weight"] * prior_loss) + lapls_l
         else:
             total_loss = (cfg["clip_weight"] * clip_loss) + lapls_l
+            
+        loss_end_t=time.time()
+        duration=loss_end_t-loss_start_t
+        total_loss_duration+=duration
+        print(f"In iteration {it}, total time for computing total loss is {duration} seconds")
 
+        start_time=time.time()
+        
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -535,6 +578,11 @@ def loop(cfg):
         normal_map.clamp_(min=-1, max=1)
         specular_map.clamp_(min=0, max=1)
         texture_map.clamp_(min=0, max=1)
+        
+        end_time=time.time()
+        duration=end_time-start_time
+        update_duration+=duration
+        print(f"In iteration {it}, total time for update is {duration} seconds")
 
         t_loop.set_description("CLIP Loss = %.6f" % clip_loss.item() )
     
@@ -548,5 +596,16 @@ def loop(cfg):
             out_path,
             m
         )
-
+    
+    total_end_t=time.time()
+    total_generation_time=total_end_t-total_start_t
+        
+    print(f"Total duration for computing diffusion prior is {prior_duration} seconds")
+    print(f"Total duration for computing text embedding is {text_embed_duration} seconds")
+    print(f"Total duration for rendering is {render_duration} seconds")
+    print(f"Total duration for computing laplacian loss is {lap_loss_duration} seconds")
+    print(f"Total duration for computing loss is {total_loss_duration} seconds")
+    print(f"Total duration for update is {update_duration} seconds")
+    print(f"Total duration for generating 3d model is {total_generation_time} seconds")
+    
     return cfg["path"]
