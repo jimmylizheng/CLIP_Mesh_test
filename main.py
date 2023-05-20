@@ -12,8 +12,10 @@ import argparse
 import numpy as np
 
 import psutil
+import subprocess
+import re
 
-from loop import loop
+from loop import loop, get_gpu_memory_usage
 
 def main():
 
@@ -142,13 +144,16 @@ def main():
 
     loop(cfg)
     
-    # Calculate memory usage after running your code
-    final_memory = get_memory_usage()
+    gpu_memory = get_gpu_memory_usage()
+    print(f"Total GPU Memory Usage: {gpu_memory} MiB")
+    
+    # # Calculate memory usage after running your code
+    # final_memory = get_memory_usage()
 
-    # Calculate the difference
-    memory_used = final_memory - initial_memory
+    # # Calculate the difference
+    # memory_used = final_memory - initial_memory
 
-    print(f"Memory used: {memory_used} bytes")
+    # print(f"Memory used: {memory_used} bytes")
 
 if __name__ == '__main__':
     main()

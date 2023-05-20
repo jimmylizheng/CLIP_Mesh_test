@@ -8,6 +8,8 @@ import torch
 import kornia
 import torchvision
 import time
+import subprocess
+import re
 
 import numpy                as np
 import nvdiffrast.torch     as dr
@@ -30,6 +32,12 @@ from nvdiffmodeling.src     import mesh
 from nvdiffmodeling.src     import render
 from nvdiffmodeling.src     import texture
 from nvdiffmodeling.src     import regularizer
+
+# Function to get GPU memory usage
+def get_gpu_memory_usage():
+    output = subprocess.check_output(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader'])
+    memory_used = re.findall(r'\d+', output.decode('utf-8'))
+    return int(memory_used[0])
 
 def loop(cfg):
     
@@ -87,6 +95,7 @@ def loop(cfg):
     duration=end_time-start_time
     text_embed_duration+=duration
 
+    start_gpu_memory = get_gpu_memory_usage()
     # Setup Prior model & get image prior (text embed -> image embed)
     if cfg["prior_path"] is not None:
         start_time=time.time()
@@ -124,6 +133,10 @@ def loop(cfg):
         end_time=time.time()
         duration=end_time-start_time
         prior_duration+=duration
+    
+    end_gpu_memory = get_gpu_memory_usage()
+    diffusion_gpu_memory = end_gpu_memory - start_gpu_memory
+    print(f"GPU Memory Usage for duffusion: {diffusion_gpu_memory} MiB")
 
     # Load all meshes and setup training parameters
     meshes = [] # store Mesh objects
