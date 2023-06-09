@@ -154,6 +154,7 @@ def main():
     # memory_used = final_memory - initial_memory
 
     # print(f"Memory used: {memory_used} bytes")
+    # print(f"Memory used: {memory_used} bytes")
 
 if __name__ == '__main__':
     main()
